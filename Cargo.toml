@@ -5,3 +5,6 @@ authors = ["Aengus McMillin <aengusm@fb.com>"]
 
 [dependencies]
 byteorder = "0.5"
+time = "0.1"
+sdl2 = "0.19"
+
