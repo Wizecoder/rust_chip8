@@ -3,6 +3,28 @@ use std::fs;
 use std::io::Read;
 use std::path::Path;
 
+const MEM_SIZE: usize = 4096;
+const NUM_GPR: usize = 16;
+const STACK_SIZE: usize = 16;
+
+struct Interpreter {
+    ram: [u32; MEM_SIZE],
+
+    gpr_regs: [u8; NUM_GPR],
+    reg_i: u16,
+
+    reg_dt: u8,
+    reg_st: u8,
+
+    reg_pc: u16,
+    reg_sp: u8,
+
+    stack: [u16; STACK_SIZE],
+}
+
+impl Interpreter {
+}
+
 fn main() {
     let start_of_ram = 0;
     let end_of_ram = 4095;
