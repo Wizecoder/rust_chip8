@@ -10,7 +10,7 @@ const STACK_SIZE: usize = 16;
 struct Interpreter {
     ram: [u32; MEM_SIZE],
 
-    gpr_regs: [u8; NUM_GPR],
+    reg_gpr: [u8; NUM_GPR],
     reg_i: u16,
 
     reg_dt: u8,
@@ -23,20 +23,20 @@ struct Interpreter {
 }
 
 impl Interpreter {
+/*    fn new() -> Interpreter {
+        Interpreter {
+            // TODO
+        }
+    }*/
 }
 
 fn main() {
-    let start_of_ram = 0;
-    let end_of_ram = 4095;
-    let start_of_program = 512;
-
-    let regs: [u8; 16];
-
-    let instr = 0x1010;
-
-    let rom_file_name = env::args().nth(1).unwrap();
-
-    let rom = read_bin(rom_file_name);
+    let program_file_name = env::args().nth(1).unwrap();
+    let program = read_bin(program_file_name);
+    
+    // store fonts in ram
+    // load program into the ram
+    // start interpreter
 }
 
 fn read_bin<P: AsRef<Path>>(path: P) -> Vec<u8> {
