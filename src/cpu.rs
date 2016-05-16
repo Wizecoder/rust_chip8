@@ -43,7 +43,6 @@ impl CPU {
     }
 
     pub fn start(&mut self) {
-        self.interconnect.setup();
         self.reg_pc = 512;
 
         let ticks = 60;
@@ -52,7 +51,7 @@ impl CPU {
         let mut delta: i64 = 0;
         let mut last_time = PreciseTime::now();
         loop {
-            let instr = self.read_word(self.reg_pc);
+            let instr = self.interconnect.read_word(self.reg_pc);
             self.reg_pc = self.reg_pc + 2;
             if self.parse_instruction(instr) {
                 break;
@@ -67,11 +66,6 @@ impl CPU {
                 if self.reg_st < steps { self.reg_st = 0 } else { self.reg_st = self.reg_st - steps }
             }
         }
-    }
-
-    #[inline(always)]
-    fn read_word(&self, addr: u16) -> u16 {
-        return self.interconnect.read_word_from_ram(addr);
     }
 
     fn parse_instruction(&mut self, instr: u16) -> bool {
@@ -232,9 +226,10 @@ impl CPU {
                 // Set Vx = Vy SHIFT_RIGHT 1, set VF to least sig bit
                 if last_val == 0x6 {
                     let y_val = self.reg_gpr[reg_y];
-                    let smallest_bit = (y_val << 7) >> 7;
-                    let new_val = (y_val >> 1);
+                    let least_sig_bit = (y_val << 7) >> 7;
+                    let new_val = y_val >> 1;
                     self.reg_gpr[reg_x] = new_val;
+                    self.reg_gpr[0xF] = least_sig_bit;
                     println!("Shifting reg {} right and storing in reg {} = {}", reg_y, reg_x, new_val);
                 }
 
@@ -254,9 +249,10 @@ impl CPU {
                 // Set Vx = Vy SIFT_LEFT 1, set VF to most sig bit
                 if last_val == 0xE {
                     let y_val = self.reg_gpr[reg_y];
-                    let smallest_bit = (y_val >> 7);
-                    let new_val = (y_val << 1);
+                    let most_sig_bit = y_val >> 7;
+                    let new_val = y_val << 1;
                     self.reg_gpr[reg_x] = new_val;
+                    self.reg_gpr[0xF] = most_sig_bit;
                     println!("Shifting reg {} left and storing in reg {} = {}", reg_y, reg_x, new_val);
                 }
             },
@@ -289,7 +285,12 @@ impl CPU {
             0xC => {
                 // Cxkk - RND Vx, byte
                 // Set Vx = random byte AND kk
-                println!("Randomness not yet implemented");
+                let reg = ((instr << 4) >> 12) as usize;
+                let val = ((instr << 8) >> 8) as u8;
+                let rand_val = self.interconnect.get_random_value();
+                let anded_val = rand_val & val;
+                self.reg_gpr[reg] = anded_val;
+                println!("Setting reg {} to random value {}", reg, anded_val);
             },
             0xD => {
                 // Dxyn - DRW Vx, Vy, nibble
@@ -299,22 +300,30 @@ impl CPU {
                 let x_val = self.reg_gpr[reg_x];
                 let y_val = self.reg_gpr[reg_y];
                 let n = ((instr << 12) >> 12) as u8;
+                self.interconnect.display_bytes(n, self.reg_i, x_val, y_val);
                 println!("[not yet implemented] Displaying {} bytes at {}, {}", n, x_val, y_val);
             },
             0xE => {
                 let filter = ((instr << 8) >> 8) as u16;
                 let reg = ((instr << 4) >> 12) as usize;
                 let reg_val = self.reg_gpr[reg];
+
                 // Ex9E - SKP Vx
                 // Skip next instruction if key with the value of Vx is pressed
                 if filter == 0x9E {
-                    println!("[not yet implemented] Skipping if key {} is pressed", reg_val);
+                    println!("Skipping if key {} is pressed", reg_val);
+                    if self.interconnect.is_key_pressed(reg_val) {
+                        self.reg_pc = self.reg_pc + 2;
+                    }
                 }
 
                 // ExA1 - SKNP Vx
                 // Skip next instruction if key with the value of Vx is not pressed
                 if filter == 0xA1 {
-                    println!("[not yet implemented] Skipping if key {} is not pressed", reg_val);
+                    println!("Skipping if key {} is not pressed", reg_val);
+                    if !self.interconnect.is_key_pressed(reg_val) {
+                        self.reg_pc = self.reg_pc + 2;
+                    }
                 }
             },
             0xF => {

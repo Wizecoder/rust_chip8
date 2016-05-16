@@ -1,3 +1,4 @@
+extern crate rand;
 extern crate byteorder;
 extern crate time;
 
@@ -17,9 +18,7 @@ fn main() {
     let program_file_name = env::args().nth(1).unwrap();
     let program = read_bin(program_file_name);
 
-    let mut interconnect: Interconnect = Interconnect::new();
-    interconnect.load_program_into_ram(program);
-
+    let interconnect = Interconnect::new(program);
     let mut cpu: CPU = CPU::new(interconnect);
     cpu.start();
 }

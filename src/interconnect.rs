@@ -1,38 +1,65 @@
 use super::fonts::get_fonts;
 use byteorder::{BigEndian, ByteOrder};
+use rand;
+use rand::Rng;
 
 const RAM_SIZE: usize = 4096;
 
 pub struct Interconnect {
-    ram: [u8; RAM_SIZE],
-
     // renderer
-    //
-    // sound util
-    //
-    // timer
+    // audio
+    // events
+    
+    ram: [u8; RAM_SIZE],
 }
 
 impl Interconnect {
-    pub fn new() -> Interconnect {
+    pub fn new(program: Vec<u8>) -> Interconnect {
+        // TODO (DONE): Load rom and fonts into memory
+        let mut ram: [u8; RAM_SIZE] = [0; RAM_SIZE];
+
+        let mut ram_index = 0;
+
+        let fonts = get_fonts();
+        for val in fonts {
+            ram[ram_index] = val;
+            ram_index = ram_index + 1;
+        }
+
+        ram_index = 512;
+        for val in program {
+            ram[ram_index] = val;
+            ram_index = ram_index + 1;
+        }
+
+        // TODO: Setup renderer
+        //
+        // TODO: Create window
+        //
+        // TODO: Setup audio device
+        //
+        // TODO: Setup event management
         Interconnect {
-            ram: [0; RAM_SIZE],
+            ram: ram,
         }
     }
 
-    pub fn setup(&mut self) {
-        self.load_fonts_into_ram();
-    }
-
     pub fn clear_display(&self) {
+        // TODO implement this
     }
 
     pub fn wait_for_keypress(&self, key: u8) {
+        // TODO implement this
         loop {}
     }
 
+    pub fn get_random_value(&self) -> u8 {
+        let mut rng = rand::thread_rng();
+        return rng.gen::<u8>();
+    }
+
     #[inline(always)]
-    pub fn read_word_from_ram(&self, addr: u16) -> u16 {
+    pub fn read_word(&self, addr: u16) -> u16 {
         BigEndian::read_u16(&self.ram[addr as usize..])
     }
 
@@ -44,20 +71,12 @@ impl Interconnect {
         return self.ram[addr];
     }
 
-    fn load_fonts_into_ram(&mut self) {
-        let fonts = get_fonts();
-        let mut ram_index = 0;
-        for val in fonts {
-            self.ram[ram_index] = val;
-            ram_index = ram_index + 1;
-        }
+    pub fn display_bytes(&mut self, num_bytes: u8, i_addr: u16, x_loc: u8, y_loc: u8) {
+        // TODO implement this
     }
 
-    pub fn load_program_into_ram(&mut self, program: Vec<u8>) {
-        let mut ram_index = 512;
-        for val in program {
-            self.ram[ram_index] = val;
-            ram_index = ram_index + 1;
-        }
+    pub fn is_key_pressed(&self, key: u8) -> bool{
+        // TODO implement this
+        return false;
     }
 }
