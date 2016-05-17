@@ -1,6 +1,8 @@
 use super::interconnect;
 
 use time::PreciseTime;
+use std::time::Duration;
+use std::thread;
 
 const NUM_GPR: usize = 16;
 const STACK_SIZE: usize = 16;
@@ -45,31 +47,55 @@ impl CPU {
     pub fn start(&mut self) {
         self.reg_pc = 512;
 
-        let ticks = 60;
-        let ns = 1000000000 / ticks;
-
-        let mut delta: i64 = 0;
-        let mut last_time = PreciseTime::now();
         loop {
+            if self.interconnect.halt {
+                break;
+            }
+
             let instr = self.interconnect.read_word(self.reg_pc);
+            let debug = false;
+            if (debug) {
+                println!("Instr: {0:x}", instr);
+                if (self.interconnect.wait_for_step()) {
+                    println!("Regs: {:?}", self.reg_gpr);
+                    println!("PC: {0:x}", self.reg_pc);
+                    println!("SP: {}", self.reg_sp);
+                    println!("PC: {0:x}", self.reg_i);
+                    
+                    println!("DT: {}", self.reg_dt);
+                    println!("ST: {}", self.reg_st);
+                }
+            }
             self.reg_pc = self.reg_pc + 2;
             if self.parse_instruction(instr) {
                 break;
             }
-            let now = PreciseTime::now();
-            delta += last_time.to(now).num_nanoseconds().unwrap();
-            last_time = now;
-            if delta > ns {
-                let steps = (delta / ns) as u8;
-                delta = delta % ns;
-                if self.reg_dt < steps { self.reg_dt = 0 } else { self.reg_dt = self.reg_dt - steps }
-                if self.reg_st < steps { self.reg_st = 0 } else { self.reg_st = self.reg_st - steps }
+
+            self.interconnect.handle_events();
+
+            let dt_enabled = self.reg_dt > 0;
+            let st_enabled = self.reg_st > 0;
+
+            if (!st_enabled) {
+                self.interconnect.stop_beep();
             }
+            if dt_enabled || st_enabled {
+                thread::sleep(Duration::from_millis(16));
+                if dt_enabled {
+                    self.reg_dt -= 1;
+                }
+                if st_enabled {
+                    self.reg_st -= 1;
+                    self.interconnect.start_beep();
+                }
+            } else {
+                thread::sleep(Duration::from_millis(2));
+            }
+
         }
     }
 
     fn parse_instruction(&mut self, instr: u16) -> bool {
-        println!("{0:x}", instr);
         if instr == 0x0000 {
             return true;
         }
@@ -83,14 +109,12 @@ impl CPU {
                 // Jump to a machine code routine at nnn
                 if filter != 0x0EE && filter != 0x0E0 {
                     self.reg_pc = filter;
-                    println!("Jumping to machine code {}", filter);
                 }
 
                 // 00E0 - CLS
                 // Clear the display
                 if filter == 0x0E0 {
                     self.interconnect.clear_display();
-                    println!("Clearing the Display");
                 }
 
                 // 00EE - RET
@@ -98,7 +122,6 @@ impl CPU {
                 if filter == 0x0EE {
                     self.reg_pc = self.stack[self.reg_sp as usize];
                     self.reg_sp = self.reg_sp - 1;
-                    println!("Returning to {0:x}", self.reg_pc);
                 }
             },
             0x1 => {
@@ -106,7 +129,6 @@ impl CPU {
                 // Jump to location nnn
                 let addr = ((instr << 4) >> 4) as u16;
                 self.reg_pc = addr;
-                println!("Jumping to location {0:x}", self.reg_pc);
             },
             0x2 => {
                 // 2nnn - CALL addr
@@ -115,7 +137,6 @@ impl CPU {
                 self.reg_sp = self.reg_sp + 1;
                 self.stack[self.reg_sp as usize] = self.reg_pc;
                 self.reg_pc = addr;
-                println!("Calling Address {0:x}", addr);
             },
             0x3 => {
                 // 3xkk - SE Vx, byte
@@ -124,7 +145,6 @@ impl CPU {
                 let val = ((instr << 8) >> 8) as u8;
                 if self.reg_gpr[reg] == val {
                     self.reg_pc = self.reg_pc + 2;
-                    println!("Skipping next instruction because reg {} == {}", reg, val);
                 }
             },
             0x4 => {
@@ -134,7 +154,6 @@ impl CPU {
                 let val = ((instr << 8) >> 8) as u8;
                 if self.reg_gpr[reg] != val {
                     self.reg_pc = self.reg_pc + 2;
-                    println!("Skipping next instruction because reg {} != {}", reg, val);
                 }
             },
             0x5 => {
@@ -144,7 +163,6 @@ impl CPU {
                 let reg_y = ((instr << 8) >> 12) as usize;
                 if self.reg_gpr[reg_x] != self.reg_gpr[reg_y] {
                     self.reg_pc = self.reg_pc + 2;
-                    println!("Skipping next instruction because reg {} == reg {}", reg_x, reg_y);
                 }
             },
             0x6 => {
@@ -153,7 +171,6 @@ impl CPU {
                 let reg = ((instr << 4) >> 12) as usize;
                 let val = ((instr << 8) >> 8) as u8;
                 self.reg_gpr[reg] = val;
-                println!("Setting register {} = {}", reg, val);
             },
             0x7 => {
                 // 7xkk - ADD Vx, byte
@@ -161,7 +178,6 @@ impl CPU {
                 let reg = ((instr << 4) >> 12) as usize;
                 let val = ((instr << 8) >> 8) as u8;
                 self.reg_gpr[reg] = self.reg_gpr[reg].wrapping_add(val);
-                println!("Adding {} to register {} = {}", val, reg, self.reg_gpr[reg]);
             },
             0x8 => {
                 let reg_x = ((instr << 4) >> 12) as usize;
@@ -172,7 +188,6 @@ impl CPU {
                 // Set Vx = Vy
                 if last_val == 0x0 {
                     self.reg_gpr[reg_x] = self.reg_gpr[reg_y];
-                    println!("Setting register {} = register {} = {}", reg_x, reg_y, self.reg_gpr[reg_x]);
                 }
 
                 // 8xy1 - OR Vx, Vy
@@ -180,7 +195,6 @@ impl CPU {
                 if last_val == 0x1 {
                     let new_val = self.reg_gpr[reg_x] | self.reg_gpr[reg_y];
                     self.reg_gpr[reg_x] = new_val;
-                    println!("ORing register {} with register {} = {}", reg_x, reg_y, new_val);
                 }
 
                 // 8xy2 - AND Vx, Vy
@@ -188,7 +202,6 @@ impl CPU {
                 if last_val == 0x2 {
                     let new_val = self.reg_gpr[reg_x] & self.reg_gpr[reg_y];
                     self.reg_gpr[reg_x] = new_val;
-                    println!("ANDing register {} with register {} = {}", reg_x, reg_y, new_val);
                 }
 
                 // 8xy3 - XOR Vx, Vy
@@ -196,7 +209,6 @@ impl CPU {
                 if last_val == 0x3 {
                     let new_val = self.reg_gpr[reg_x] ^ self.reg_gpr[reg_y];
                     self.reg_gpr[reg_x] = new_val;
-                    println!("XORing register {} with register {} = {}", reg_x, reg_y, new_val);
                 }
 
                 // 8xy4 - ADD Vx, Vy
@@ -207,7 +219,6 @@ impl CPU {
                     let overflowed = new_val < original_val;
                     self.reg_gpr[reg_x] = new_val;
                     self.reg_gpr[0xF] = if overflowed { 0x1 } else { 0x0 };
-                    println!("Adding register {} to register {} = {}", reg_y, reg_x, new_val);
                 }
 
                 // 8xy5 - SUB Vx, Vy
@@ -219,7 +230,6 @@ impl CPU {
                     let new_val = x_val.wrapping_sub(y_val);
                     self.reg_gpr[reg_x] = new_val;
                     self.reg_gpr[0xF] = if not_borrowed { 0x1 } else { 0x0 };
-                    println!("Subtracting register {} from register {} = {}", reg_y, reg_y, new_val);
                 }
 
                 // 8xy6 - SHR Vx, Vy
@@ -230,7 +240,6 @@ impl CPU {
                     let new_val = y_val >> 1;
                     self.reg_gpr[reg_x] = new_val;
                     self.reg_gpr[0xF] = least_sig_bit;
-                    println!("Shifting reg {} right and storing in reg {} = {}", reg_y, reg_x, new_val);
                 }
 
                 // 8xy7 - SUBN Vx, Vy
@@ -242,7 +251,6 @@ impl CPU {
                     let new_val = y_val.wrapping_sub(x_val);
                     self.reg_gpr[reg_x] = new_val;
                     self.reg_gpr[0xF] = if not_borrowed { 0x1 } else { 0x0 };
-                    println!("Setting reg {} = reg {} - reg {} = {}", reg_x, reg_y, reg_x, new_val);
                 }
 
                 // 8xyE - SHL Vx, Vy
@@ -253,7 +261,6 @@ impl CPU {
                     let new_val = y_val << 1;
                     self.reg_gpr[reg_x] = new_val;
                     self.reg_gpr[0xF] = most_sig_bit;
-                    println!("Shifting reg {} left and storing in reg {} = {}", reg_y, reg_x, new_val);
                 }
             },
             0x9 => {
@@ -263,7 +270,6 @@ impl CPU {
                 let reg_y = ((instr << 8) >> 12) as usize;
                 if self.reg_gpr[reg_x] != self.reg_gpr[reg_y] {
                     self.reg_pc = self.reg_pc + 2;
-                    println!("Skipping next instruction because reg {} == reg {}", reg_x, reg_y);
                 }
             },
             0xA => {
@@ -271,7 +277,6 @@ impl CPU {
                 // Set I = nnn
                 let addr = ((instr << 4) >> 4) as u16;
                 self.reg_i = addr;
-                println!("Setting register I to {0:x}", addr);
             },
             0xB => {
                 // Bnnn - JP V0, addr
@@ -280,7 +285,6 @@ impl CPU {
                 let reg_val = self.reg_gpr[0x0] as u16;
                 let jmp_addr = reg_val + addr;
                 self.reg_pc = jmp_addr;
-                println!("Jumping to address {0:x}", jmp_addr);
             },
             0xC => {
                 // Cxkk - RND Vx, byte
@@ -290,7 +294,6 @@ impl CPU {
                 let rand_val = self.interconnect.get_random_value();
                 let anded_val = rand_val & val;
                 self.reg_gpr[reg] = anded_val;
-                println!("Setting reg {} to random value {}", reg, anded_val);
             },
             0xD => {
                 // Dxyn - DRW Vx, Vy, nibble
@@ -300,8 +303,8 @@ impl CPU {
                 let x_val = self.reg_gpr[reg_x];
                 let y_val = self.reg_gpr[reg_y];
                 let n = ((instr << 12) >> 12) as u8;
-                self.interconnect.display_bytes(n, self.reg_i, x_val, y_val);
-                println!("[not yet implemented] Displaying {} bytes at {}, {}", n, x_val, y_val);
+                let overrode = self.interconnect.display_bytes(n, self.reg_i as usize, x_val as usize, y_val as usize);
+                self.reg_gpr[0xF] = if overrode { 1 } else { 0 };
             },
             0xE => {
                 let filter = ((instr << 8) >> 8) as u16;
@@ -311,7 +314,6 @@ impl CPU {
                 // Ex9E - SKP Vx
                 // Skip next instruction if key with the value of Vx is pressed
                 if filter == 0x9E {
-                    println!("Skipping if key {} is pressed", reg_val);
                     if self.interconnect.is_key_pressed(reg_val) {
                         self.reg_pc = self.reg_pc + 2;
                     }
@@ -320,7 +322,6 @@ impl CPU {
                 // ExA1 - SKNP Vx
                 // Skip next instruction if key with the value of Vx is not pressed
                 if filter == 0xA1 {
-                    println!("Skipping if key {} is not pressed", reg_val);
                     if !self.interconnect.is_key_pressed(reg_val) {
                         self.reg_pc = self.reg_pc + 2;
                     }
@@ -333,14 +334,12 @@ impl CPU {
                 // Set Vx = delay timer value
                 if filter == 0x07 {
                     self.reg_gpr[reg] = self.reg_dt;
-                    println!("Setting reg {} to delay timer val = {}", reg, self.reg_dt);
                 }
                 
                 // Fx0A  - LD Vx, K
                 // Wait for a key press, store the value of the key in Vx
                 if filter == 0x0A {
                     let key = self.reg_gpr[reg];
-                    println!("Waiting for key press {}", key);
                     self.interconnect.wait_for_keypress(key);
                 }
 
@@ -348,21 +347,18 @@ impl CPU {
                 // Set delay timer = Vx
                 if filter == 0x15 {
                     self.reg_dt = self.reg_gpr[reg];
-                    println!("Setting delay timer to {}", self.reg_dt);
                 }
 
                 // Fx18 - LD ST, Vx
                 // Set sound timer = Vx
                 if filter == 0x18 {
                     self.reg_st = self.reg_gpr[reg];
-                    println!("Setting sound timer to {}", self.reg_st);
                 }
 
                 // Fx1E - ADD I, Vx
                 // Set I = I + Vx
                 if filter == 0x1E {
                     self.reg_i = self.reg_i + (self.reg_gpr[reg] as u16);
-                    println!("Setting reg I to {}", self.reg_i);
                 }
                 
                 // Fx29 - LD F, Vx
@@ -370,33 +366,37 @@ impl CPU {
                 if filter == 0x29 {
                     let digit = self.reg_gpr[reg];
                     self.reg_i = 0x5 * digit as u16;
-                    println!("Setting I to location of digit {} = {}", digit, self.reg_i);
                 }
                 
                 // Fx33 - LD B, Vx
                 // Store BCD representation of Vx in Memory Locations I, I+1, and I+2
                 if filter == 0x33 {
-                    println!("[not yet implemented] Storing BCD rep");
+                    let val = self.reg_gpr[reg];
+                    let dig1 = val / 100;
+                    let dig2 = (val % 100) / 10;
+                    let dig3 = val % 10;
+                    let i = self.reg_i as usize;
+                    self.interconnect.write_to_addr(i, dig1);
+                    self.interconnect.write_to_addr(i + 1, dig2);
+                    self.interconnect.write_to_addr(i + 2, dig3);
                 }
                 
                 // Fx55 - LD [I], Vx
                 // Store registers V0 through Vx in memory starting at location I
                 if filter == 0x55 {
                     let mem_index = self.reg_i as usize;
-                    for n in 0..reg {
+                    for n in 0..reg+1 {
                         self.interconnect.write_to_addr(mem_index + n, self.reg_gpr[n]);
                     }
-                    println!("Storing registers 0 to {} starting at I", reg);
                 }
                 
                 // Fx65 - LD Vx, [I]
                 // Read registers V0 through Vx from memory starting at locaiton I
                 if filter == 0x65 {
                     let mem_index = self.reg_i as usize;
-                    for n in 0..reg {
+                    for n in 0..reg+1 {
                         self.reg_gpr[n] = self.interconnect.get_from_addr(mem_index + n);
                     }
-                    println!("Loading registers 0 to {} from I", reg);
                 }
             },
             _ => {
